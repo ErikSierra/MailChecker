@@ -32,8 +32,3 @@ Run the script using Python from the command line:
    ```bash
    export EMAIL_USER='your_email@gmail.com'
    export EMAIL_PASS='yourapppassword'
-
-
-
-
-
