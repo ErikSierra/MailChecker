@@ -27,7 +27,7 @@ Update the script with your specific details where necessary, particularly in se
 ## Usage
 Run the script using Python from the command line:
 ```bash
-  python email_tracker.py
+   python email_tracker.py
 
 ## Logging
 Logs are written to email_count_log.txt and are rotated every 30 days with a backup of the last period kept.
