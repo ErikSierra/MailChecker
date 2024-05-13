@@ -11,6 +11,8 @@ Email Tracker is a Python script that counts the number of emails received in a 
 ## Logging
 Logs are written to email_count_log.txt and are rotated every 30 days with a backup of the last period kept.
 
+
+## Examples
 ![Example](https://i.imgur.com/9XnHSnV.jpeg)
 ![logExample](https://i.imgur.com/kBp8rRB.png)
 
