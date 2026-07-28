@@ -1,98 +1,124 @@
+"""Count today's Gmail inbox emails and send yourself the total as a text.
+
+Connects to Gmail over IMAP, counts messages received today, and emails the
+count to a carrier SMS gateway address (e.g. 1234567890@txt.att.net) so it
+arrives as a text message.
+
+Configuration is read from environment variables:
+    EMAIL_USER     Gmail address to check (also used as the sender)
+    EMAIL_PASS     Gmail app password (not your normal account password)
+    SMS_RECIPIENT  Destination address, usually a carrier SMS gateway
+"""
+
 import imaplib
-import smtplib
-from email.message import EmailMessage
-from datetime import datetime
 import logging
 import logging.handlers
 import os
+import smtplib
+import sys
+from datetime import datetime
+from email.message import EmailMessage
 
-# Set up basic logging configuration
-log_filename = 'email_count_log.txt'
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+IMAP_HOST = "imap.gmail.com"
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 465
+LOG_FILENAME = "email_count_log.txt"
 
-# Create a timed rotating file handler
-handler = logging.handlers.TimedRotatingFileHandler(
-    log_filename, when='D', interval=1, backupCount=7
-)
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
+logger = logging.getLogger(__name__)
 
-# Avoid adding multiple handlers if the script runs multiple times
-if not logger.handlers:
-    logger.addHandler(handler)
 
-logging.info("Starting the script")
+def setup_logging():
+    """Log to a file that rotates daily, keeping the last 7 days."""
+    handler = logging.handlers.TimedRotatingFileHandler(
+        LOG_FILENAME, when="D", interval=1, backupCount=7
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    )
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        logger.addHandler(handler)
+
 
 def count_emails_today(username, password):
+    """Return the number of inbox emails received today, or None on error."""
     try:
-        with imaplib.IMAP4_SSL('imap.gmail.com') as mail:
+        with imaplib.IMAP4_SSL(IMAP_HOST) as mail:
             mail.login(username, password)
-            mail.select('inbox')
+            mail.select("inbox")
             date = datetime.now().strftime("%d-%b-%Y")  # Format: DD-MMM-YYYY
             typ, data = mail.search(None, f'(ON "{date}")')
-            if typ != 'OK':
-                logging.error(f"IMAP search failed: {typ}")
+            if typ != "OK":
+                logger.error("IMAP search failed: %s", typ)
                 return None
             email_count = len(data[0].split())
-            logging.info(f"Emails counted: {email_count}")
+            logger.info("Emails counted: %s", email_count)
             return email_count
-    except imaplib.IMAP4.error as e:
-        logging.error(f"IMAP error: {str(e)}")
+    except imaplib.IMAP4.error as exc:
+        logger.error("IMAP error: %s", exc)
         return None
-    except Exception as e:
-        logging.error(f"Error in count_emails_today: {str(e)}")
+    except Exception as exc:
+        logger.error("Error in count_emails_today: %s", exc)
         return None
 
-def send_text_message(emails_count, from_email, from_password, recipient_email):
-    if emails_count is None:
-        logging.error("Failed to send text message because email count is None")
-        return
+
+def send_text_message(email_count, from_email, from_password, recipient):
+    """Email the count to a carrier SMS gateway so it arrives as a text."""
     try:
-        # Create an SSL context and connect to the SMTP server
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
             server.login(from_email, from_password)
             today = datetime.now()
-            day_of_week = today.strftime("%A")
-            formatted_date = today.strftime("%m/%d/%Y")
             message = EmailMessage()
-            message['Subject'] = 'Email Count'
-            message['From'] = from_email
-            message['To'] = recipient_email
+            message["Subject"] = "Email Count"
+            message["From"] = from_email
+            message["To"] = recipient
             message.set_content(
-                f"You received {emails_count} emails on {day_of_week}, {formatted_date}."
+                f"You received {email_count} emails on "
+                f"{today.strftime('%A')}, {today.strftime('%m/%d/%Y')}."
             )
             server.send_message(message)
-            logging.info("Text message sent successfully")
-    except smtplib.SMTPException as e:
-        logging.error(f"SMTP error: {str(e)}")
-    except Exception as e:
-        logging.error(f"Error in send_text_message: {str(e)}")
+            logger.info("Text message sent successfully")
+            return True
+    except smtplib.SMTPException as exc:
+        logger.error("SMTP error: %s", exc)
+    except Exception as exc:
+        logger.error("Error in send_text_message: %s", exc)
+    return False
 
-# Environment variables for user-specific settings
-username = os.getenv('EMAIL_USER')
-password = os.getenv('EMAIL_PASS')
-from_email = username
-from_password = password
-recipient_number = os.getenv('SMS_RECIPIENT')
 
-# Verify that all required environment variables are set
-if not all([username, password, recipient_number]):
-    logging.error("One or more environment variables are not set.")
-    logging.error(f"EMAIL_USER: {username}")
-    logging.error(f"EMAIL_PASS: {'Set' if password else 'Not Set'}")
-    logging.error(f"SMS_RECIPIENT: {recipient_number}")
-    exit(1)
+def main():
+    setup_logging()
+    logger.info("Starting the script")
 
-# Ensure recipient_number includes the carrier SMS gateway domain
-# Example: '1234567890@txt.att.net'
-if '@' not in recipient_number:
-    logging.error("Recipient number is not properly formatted with SMS gateway domain.")
-    recipient_number = None
+    username = os.getenv("EMAIL_USER")
+    password = os.getenv("EMAIL_PASS")
+    recipient = os.getenv("SMS_RECIPIENT")
 
-# Function calls to count emails and send notification
-emails_received = count_emails_today(username, password)
-if emails_received is not None and recipient_number:
-    send_text_message(emails_received, from_email, from_password, recipient_number)
-else:
-    logging.info("No email count retrieved or recipient number invalid; no message sent.")
+    if not all([username, password, recipient]):
+        logger.error("One or more environment variables are not set.")
+        logger.error("EMAIL_USER: %s", "Set" if username else "Not Set")
+        logger.error("EMAIL_PASS: %s", "Set" if password else "Not Set")
+        logger.error("SMS_RECIPIENT: %s", "Set" if recipient else "Not Set")
+        return 1
+
+    # The recipient should be a carrier SMS gateway address,
+    # e.g. '1234567890@txt.att.net'
+    if "@" not in recipient:
+        logger.error(
+            "SMS_RECIPIENT is not an email-style address; expected something "
+            "like 1234567890@txt.att.net"
+        )
+        return 1
+
+    email_count = count_emails_today(username, password)
+    if email_count is None:
+        logger.info("No email count retrieved; no message sent.")
+        return 1
+
+    if not send_text_message(email_count, username, password, recipient):
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
